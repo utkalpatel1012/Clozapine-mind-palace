@@ -1,0 +1,8 @@
+{
+  "name": "Clozapine Mind Palace",
+  "description": "An interactive 3D spatial mind palace walkthrough for master-level clinical pharmacology, mechanisms, pharmacokinetics, adverse effects, recent advances, and research literature on clozapine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
