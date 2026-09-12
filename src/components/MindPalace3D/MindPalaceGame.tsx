@@ -8,6 +8,7 @@ import { PalaceSceneManager, DoorObject, LocusObject } from "./PalaceSceneManage
 import { PalaceRoom, PalaceRoomId, MnemonicLocus } from "../../types";
 import { PALACE_ROOMS } from "../../data/clozapineData";
 import { LocusInspectorModal } from "./LocusInspectorModal";
+import { VoiceTopicInteractionModal, VoiceTopic } from "./VoiceTopicInteractionModal";
 import {
   Compass,
   Eye,
@@ -22,6 +23,12 @@ import {
   Stethoscope,
   ChevronDown,
   Navigation,
+  Mic,
+  Radio,
+  Minus,
+  Maximize2,
+  Headphones,
+  CheckCircle2,
 } from "lucide-react";
 import { palaceAudio } from "../../utils/palaceAudio";
 
@@ -33,6 +40,30 @@ interface MindPalaceGameProps {
   onOpenDossier?: (roomId: PalaceRoomId) => void;
   initialRoomId?: PalaceRoomId | null;
 }
+
+const CLINICAL_TIERS = [
+  {
+    tierNumber: 1,
+    title: "Foundations & Pharmacology",
+    badge: "Chambers 1–3",
+    color: "#f59e0b",
+    rooms: PALACE_ROOMS.slice(0, 3),
+  },
+  {
+    tierNumber: 2,
+    title: "Safety, REMS & Toxicity",
+    badge: "Chambers 4–6",
+    color: "#ef4444",
+    rooms: PALACE_ROOMS.slice(3, 6),
+  },
+  {
+    tierNumber: 3,
+    title: "Mastery, Guidelines & Horizons",
+    badge: "Chambers 7–9",
+    color: "#8b5cf6",
+    rooms: PALACE_ROOMS.slice(6, 9),
+  },
+];
 
 export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
   onOpenCurator,
@@ -58,11 +89,36 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
   // Active inspected locus modal
   const [inspectedLocus, setInspectedLocus] = useState<MnemonicLocus | null>(null);
 
+  // Voice Topic Interaction Modal state
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [voiceTopic, setVoiceTopic] = useState<VoiceTopic | null>(null);
+
   // Settings & HUD toggles
-  const [isFirstPerson, setIsFirstPerson] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  const [isFirstPerson, setIsFirstPerson] = useState(false);
   const [showDirectory, setShowDirectory] = useState(false);
   const [showControlsGuide, setShowControlsGuide] = useState(true);
+
+  // Audio Guide & Voice narration state
+  const [audioGuideActive, setAudioGuideActive] = useState(true);
+  const [isSpeakingTopic, setIsSpeakingTopic] = useState(false);
+  const lastAnnouncedTopicIdRef = useRef<string | null>(null);
+  const audioGuideActiveRef = useRef(audioGuideActive);
+  const audioEnabledRef = useRef(audioEnabled);
+
+  // Visited loci stations tracker
+  const [visitedLociIds, setVisitedLociIds] = useState<Record<string, boolean>>({});
+
+  // D-Pad minimization toggle
+  const [isControlsMinimized, setIsControlsMinimized] = useState(false);
+
+  useEffect(() => {
+    audioGuideActiveRef.current = audioGuideActive;
+  }, [audioGuideActive]);
+
+  useEffect(() => {
+    audioEnabledRef.current = audioEnabled;
+  }, [audioEnabled]);
 
   // Minimap radar state
   const [playerCoord, setPlayerCoord] = useState<{ x: number; z: number; rotation: number }>({
@@ -90,6 +146,104 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
       palaceAudio.playDoorChime();
     }
   }, [audioEnabled]);
+
+  // Trigger Voice Interaction modal for active or nearest topic
+  const handleTriggerVoiceModal = useCallback(
+    (customTopic?: VoiceTopic) => {
+      if (customTopic) {
+        setVoiceTopic(customTopic);
+        setVoiceModalOpen(true);
+        return;
+      }
+
+      if (managerRef.current?.nearestLocus) {
+        const loc = managerRef.current.nearestLocus.locus;
+        setVoiceTopic({
+          title: loc.name,
+          category: activeRoom ? `${activeRoom.name} • Station` : "Chamber Station",
+          context: `Memory Anchor: ${loc.memoryHook}\nPharmacological Mechanism: ${loc.pharmacologyFact}\nHigh-Yield Pearl: ${loc.highYieldFact}\nClinical Action Protocol: ${loc.clinicalAction}`,
+          suggestedQuestions: [
+            `What are the high-yield exam pearls for ${loc.name}?`,
+            `How should I manage this adverse effect in clinical practice?`,
+            `What receptor mechanism explains this finding?`,
+          ],
+        });
+        setVoiceModalOpen(true);
+      } else if (managerRef.current?.nearestDoor) {
+        const door = managerRef.current.nearestDoor;
+        const room = PALACE_ROOMS.find((r) => r.id === door.roomId);
+        if (room) {
+          setVoiceTopic({
+            title: `Door ${door.doorNumber}: ${room.name}`,
+            category: "Palace Chamber Entrance",
+            context: `Subtitle: ${room.subtitle}\nAtmosphere: ${room.architecturalAtmosphere}\nClinical Pearls: ${room.clinicalPearls.slice(0, 3).join("; ")}`,
+            suggestedQuestions: [
+              `What are the core concepts covered in ${room.name}?`,
+              `What clinical guidelines apply to this topic?`,
+              `What are the classic board exam questions on this topic?`,
+            ],
+          });
+          setVoiceModalOpen(true);
+        }
+      } else if (activeRoom) {
+        setVoiceTopic({
+          title: activeRoom.name,
+          category: "Active Chamber",
+          context: `Subtitle: ${activeRoom.subtitle}\nAtmosphere: ${activeRoom.architecturalAtmosphere}\nClinical Pearls: ${activeRoom.clinicalPearls.slice(0, 3).join("; ")}`,
+          suggestedQuestions: [
+            `Summarize the key takeaways of ${activeRoom.name}`,
+            `What are the most critical safety protocols for this chamber?`,
+            `What are common clinical pitfalls and traps?`,
+          ],
+        });
+        setVoiceModalOpen(true);
+      } else {
+        setVoiceTopic({
+          title: "Grand Rotunda (Palace Hub)",
+          category: "Mind Palace Central Hub",
+          context: "The Grand Rotunda provides access to all 9 specialized pharmacological and clinical chambers of Clozapine, from historical discoveries to receptor affinities, toxicity management, and modern guidelines.",
+          suggestedQuestions: [
+            "Which chamber should I visit first for Clozapine basics?",
+            "What are the 5 Black Box warnings of Clozapine?",
+            "Explain the February 2025 FDA REMS elimination update.",
+          ],
+        });
+        setVoiceModalOpen(true);
+      }
+    },
+    [activeRoom]
+  );
+
+  // Toggle voice narration for current nearest topic
+  const handleToggleTopicAudio = useCallback(() => {
+    if (isSpeakingTopic) {
+      palaceAudio.stopSpeaking();
+      setIsSpeakingTopic(false);
+      return;
+    }
+
+    if (managerRef.current?.nearestLocus) {
+      const loc = managerRef.current.nearestLocus.locus;
+      const speechText = `Station: ${loc.name}. Memory anchor: ${loc.memoryHook}. Evidence: ${loc.scientificFact}. Protocol: ${loc.clinicalAction}`;
+      palaceAudio.speak(speechText, {
+        onStart: () => setIsSpeakingTopic(true),
+        onEnd: () => setIsSpeakingTopic(false),
+        onError: () => setIsSpeakingTopic(false),
+      });
+    } else if (managerRef.current?.nearestDoor) {
+      const door = managerRef.current.nearestDoor;
+      const room = PALACE_ROOMS.find((r) => r.id === door.roomId);
+      if (room) {
+        const pearl = room.clinicalPearls[0] || room.architecturalAtmosphere;
+        const speechText = `Door ${door.doorNumber}: ${room.name}. ${room.subtitle}. Clinical pearl: ${pearl}`;
+        palaceAudio.speak(speechText, {
+          onStart: () => setIsSpeakingTopic(true),
+          onEnd: () => setIsSpeakingTopic(false),
+          onError: () => setIsSpeakingTopic(false),
+        });
+      }
+    }
+  }, [isSpeakingTopic]);
 
   // Handle entering a room from 3D doorway
   const handleEnterRoom = useCallback(
@@ -133,7 +287,9 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
       if (managerRef.current.nearestDoor) {
         handleEnterRoom(managerRef.current.nearestDoor.roomId);
       } else if (managerRef.current.nearestLocus) {
-        setInspectedLocus(managerRef.current.nearestLocus.locus);
+        const loc = managerRef.current.nearestLocus.locus;
+        setInspectedLocus(loc);
+        setVisitedLociIds((prev) => ({ ...prev, [loc.id]: true }));
       } else if (managerRef.current.isNearExitDoor) {
         handleReturnRotunda();
       }
@@ -177,7 +333,8 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
       (roomId) => handleEnterRoom(roomId),
       () => handleReturnRotunda(),
       () => playFootstep(),
-      () => handleInteract()
+      () => handleInteract(),
+      () => handleTriggerVoiceModal()
     );
 
     managerRef.current = manager;
@@ -214,6 +371,33 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
           z: managerRef.current.characterController.position.z,
           rotation: managerRef.current.characterController.rotation,
         });
+
+        // Automatic high-yield voice guidance when approaching a topic
+        if (audioGuideActiveRef.current && audioEnabledRef.current) {
+          if (managerRef.current.nearestDoor) {
+            const doorId = managerRef.current.nearestDoor.roomId;
+            if (lastAnnouncedTopicIdRef.current !== `door-${doorId}`) {
+              lastAnnouncedTopicIdRef.current = `door-${doorId}`;
+              const room = PALACE_ROOMS.find((r) => r.id === doorId);
+              if (room) {
+                palaceAudio.speak(
+                  `Approaching Door ${managerRef.current.nearestDoor.doorNumber}: ${room.name}. Press T to voice consult, or E to enter.`
+                );
+              }
+            }
+          } else if (managerRef.current.nearestLocus) {
+            const locId = managerRef.current.nearestLocus.locus.id;
+            if (lastAnnouncedTopicIdRef.current !== `locus-${locId}`) {
+              lastAnnouncedTopicIdRef.current = `locus-${locId}`;
+              const loc = managerRef.current.nearestLocus.locus;
+              palaceAudio.speak(
+                `Station: ${loc.name}. Press T for voice inquiry, or E to inspect.`
+              );
+            }
+          } else if (!managerRef.current.nearestDoor && !managerRef.current.nearestLocus) {
+            lastAnnouncedTopicIdRef.current = null;
+          }
+        }
       }
 
       animationFrameId = requestAnimationFrame(animate);
@@ -393,48 +577,96 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
             {showDirectory && (
               <div
                 id="hud-directory-dropdown"
-                className="absolute top-full left-0 mt-2 w-72 max-h-80 overflow-y-auto rounded-2xl bg-slate-900/95 border border-slate-700/90 shadow-2xl p-2 z-50 backdrop-blur-md space-y-1"
+                className="absolute top-full left-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-2xl bg-slate-900/98 border border-slate-700/90 shadow-2xl p-2.5 z-50 backdrop-blur-md space-y-2 text-left"
               >
-                <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
-                  <span>Palace Door Directory</span>
+                <div className="px-2 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                  <span>Chamber Directory (9 Doors)</span>
                   <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
                 </div>
+
+                {/* Return to Palace Hub */}
                 <button
                   onClick={() => {
                     handleReturnRotunda();
                     setShowDirectory(false);
                   }}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2 transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors cursor-pointer ${
                     currentMode === "rotunda"
-                      ? "bg-amber-500/20 text-amber-200 font-semibold"
+                      ? "bg-amber-500/20 text-amber-200 font-semibold border border-amber-500/40"
                       : "text-slate-300 hover:bg-slate-800"
                   }`}
                 >
-                  <Compass className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Grand Rotunda (Palace Hub)</span>
+                  <Compass className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <div className="flex-1">
+                    <div className="font-semibold">Grand Rotunda (Palace Hub)</div>
+                    <div className="text-[10px] text-slate-400">Kane 1988 Fountain • All 9 Doors</div>
+                  </div>
                 </button>
-                {PALACE_ROOMS.map((r, i) => (
-                  <button
-                    key={r.id}
-                    onClick={() => {
-                      handleEnterRoom(r.id);
-                      setShowDirectory(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2 transition-colors ${
-                      activeRoomId === r.id
-                        ? "bg-slate-800 text-white font-semibold"
-                        : "text-slate-300 hover:bg-slate-800/70"
-                    }`}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: r.themeColor.accentHex }}
-                    />
-                    <span className="truncate">
-                      Door {i + 1} • {r.name}
-                    </span>
-                  </button>
+
+                {/* 3 Organized Clinical Tiers */}
+                {CLINICAL_TIERS.map((tier) => (
+                  <div key={tier.tierNumber} className="pt-1">
+                    <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider flex items-center justify-between text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tier.color }} />
+                        <span>Tier {tier.tierNumber}: {tier.title}</span>
+                      </span>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300">
+                        {tier.badge}
+                      </span>
+                    </div>
+                    <div className="mt-1 space-y-1">
+                      {tier.rooms.map((r) => {
+                        const globalDoorNumber = PALACE_ROOMS.findIndex((room) => room.id === r.id) + 1;
+                        const isCurrentRoom = activeRoomId === r.id;
+                        return (
+                          <button
+                            key={r.id}
+                            onClick={() => {
+                              handleEnterRoom(r.id);
+                              setShowDirectory(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                              isCurrentRoom
+                                ? "bg-slate-800 text-white font-semibold border border-slate-700 shadow-sm"
+                                : "text-slate-300 hover:bg-slate-800/70"
+                            }`}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: r.themeColor.accentHex }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate font-medium text-slate-200">
+                                Door {globalDoorNumber}: {r.name}
+                              </div>
+                              <div className="truncate text-[10px] text-slate-400">
+                                {r.subtitle}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))}
+
+                {/* Voice Ask in Directory */}
+                <div className="pt-1 border-t border-slate-800">
+                  <button
+                    onClick={() => {
+                      setShowDirectory(false);
+                      handleTriggerVoiceModal();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-between transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2 font-medium">
+                      <Mic className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Voice Ask Curator About Topic</span>
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20">Press T</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -442,6 +674,28 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
 
         {/* Right: Quick Tools, Curator, References, Controls */}
         <div className="pointer-events-auto flex items-center gap-2">
+          {/* Audio Guide Toggle */}
+          <button
+            id="hud-voice-guide-toggle-btn"
+            onClick={() => {
+              const next = !audioGuideActive;
+              setAudioGuideActive(next);
+              if (!next) {
+                palaceAudio.stopSpeaking();
+                setIsSpeakingTopic(false);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs transition-all shadow-md backdrop-blur-md cursor-pointer ${
+              audioGuideActive
+                ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+                : "bg-slate-900/90 text-slate-400 border-slate-700/80 hover:text-slate-200"
+            }`}
+            title="Toggle Automatic Voice Guidance on Approaching Topics"
+          >
+            <Radio className={`w-3.5 h-3.5 ${audioGuideActive ? "text-amber-400 animate-pulse" : "text-slate-500"}`} />
+            <span className="hidden md:inline">Voice Guide: {audioGuideActive ? "ON" : "OFF"}</span>
+          </button>
+
           {/* Perspective Switcher */}
           <button
             id="toggle-perspective-btn"
@@ -570,21 +824,43 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
                 <ArrowLeft className="w-3 h-3" />
                 <span>Exit Door</span>
               </button>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold px-1 flex items-center gap-1">
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-900/90 text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold border border-cyan-500/30">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Stations:</span>
-              </span>
-              {activeRoom?.spatialLoci.map((loc, idx) => (
-                <button
-                  key={loc.id}
-                  onClick={() => handleWalkToLocus(loc.id)}
-                  title={`Walk Dr. Explorer to ${loc.name}`}
-                  className="px-2.5 py-1 rounded-xl text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 border border-slate-800/80 hover:scale-105 bg-slate-900/90 text-slate-300 hover:text-white cursor-pointer"
-                >
-                  <span className="text-cyan-400 font-mono text-[10px]">#{idx + 1}</span>
-                  <span>{loc.name.slice(0, 16)}</span>
-                </button>
-              ))}
+                <span>
+                  Stations: {activeRoom?.spatialLoci.filter((l) => visitedLociIds[l.id]).length || 0} /{" "}
+                  {activeRoom?.spatialLoci.length || 0}
+                </span>
+              </div>
+              {activeRoom?.spatialLoci.map((loc, idx) => {
+                const isVisited = !!visitedLociIds[loc.id];
+                return (
+                  <button
+                    key={loc.id}
+                    onClick={() => handleWalkToLocus(loc.id)}
+                    title={`Walk Dr. Explorer to ${loc.name}`}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 border hover:scale-105 cursor-pointer ${
+                      isVisited
+                        ? "bg-cyan-950/60 text-cyan-200 border-cyan-500/50 shadow-sm"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border-slate-800/80"
+                    }`}
+                  >
+                    {isVisited ? (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <span className="text-cyan-400 font-mono text-[10px]">#{idx + 1}</span>
+                    )}
+                    <span>{loc.name.slice(0, 16)}</span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => handleTriggerVoiceModal()}
+                className="px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap bg-cyan-400 hover:bg-cyan-300 text-slate-950 flex items-center gap-1 cursor-pointer transition-all ml-1 shadow-sm"
+                title="Voice Ask Curator about this Chamber [T]"
+              >
+                <Mic className="w-3 h-3" />
+                <span>Voice Ask [T]</span>
+              </button>
             </>
           )}
         </div>
@@ -728,96 +1004,114 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
       {/* =================================================================== */}
       {/* VIRTUAL ON-SCREEN D-PAD (FOR QUICK MOUSE & TOUCH CHARACTER CONTROL) */}
       {/* =================================================================== */}
-      <div
-        id="hud-onscreen-dpad"
-        className="absolute bottom-6 left-6 z-30 pointer-events-auto flex flex-col items-center bg-slate-950/85 border border-slate-800/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md"
-      >
-        <div className="w-full flex items-center justify-between text-[9px] font-mono uppercase tracking-widest text-slate-400 mb-1.5 px-1">
-          <span className="flex items-center gap-1 text-amber-400 font-bold">
-            <Navigation className="w-3 h-3" />
-            <span>Walk</span>
-          </span>
-          <span className="text-[9px] text-slate-500">Dr. Explorer</span>
-        </div>
-        <div className="grid grid-cols-3 gap-1">
-          <div />
-          <button
-            onMouseDown={() => managerRef.current?.characterController.setForward(true)}
-            onMouseUp={() => managerRef.current?.characterController.setForward(false)}
-            onMouseLeave={() => managerRef.current?.characterController.setForward(false)}
-            onTouchStart={() => managerRef.current?.characterController.setForward(true)}
-            onTouchEnd={() => managerRef.current?.characterController.setForward(false)}
-            className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
-            title="Forward (W)"
-          >
-            ▲
-          </button>
-          <div />
+      {isControlsMinimized ? (
+        <button
+          id="hud-expand-dpad-btn"
+          onClick={() => setIsControlsMinimized(false)}
+          className="absolute bottom-6 left-6 z-30 pointer-events-auto px-3 py-2 rounded-xl bg-slate-950/85 hover:bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 flex items-center gap-2 shadow-2xl backdrop-blur-md cursor-pointer transition-all"
+        >
+          <Navigation className="w-3.5 h-3.5 text-amber-400" />
+          <span>Walk Controls</span>
+          <Maximize2 className="w-3 h-3 text-slate-400" />
+        </button>
+      ) : (
+        <div
+          id="hud-onscreen-dpad"
+          className="absolute bottom-6 left-6 z-30 pointer-events-auto flex flex-col items-center bg-slate-950/85 border border-slate-800/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md"
+        >
+          <div className="w-full flex items-center justify-between text-[9px] font-mono uppercase tracking-widest text-slate-400 mb-1.5 px-1">
+            <span className="flex items-center gap-1 text-amber-400 font-bold">
+              <Navigation className="w-3 h-3" />
+              <span>Walk</span>
+            </span>
+            <button
+              onClick={() => setIsControlsMinimized(true)}
+              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white cursor-pointer"
+              title="Minimize Controls"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <div />
+            <button
+              onMouseDown={() => managerRef.current?.characterController.setForward(true)}
+              onMouseUp={() => managerRef.current?.characterController.setForward(false)}
+              onMouseLeave={() => managerRef.current?.characterController.setForward(false)}
+              onTouchStart={() => managerRef.current?.characterController.setForward(true)}
+              onTouchEnd={() => managerRef.current?.characterController.setForward(false)}
+              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
+              title="Forward (W)"
+            >
+              ▲
+            </button>
+            <div />
 
-          <button
-            onMouseDown={() => managerRef.current?.characterController.setLeft(true)}
-            onMouseUp={() => managerRef.current?.characterController.setLeft(false)}
-            onMouseLeave={() => managerRef.current?.characterController.setLeft(false)}
-            onTouchStart={() => managerRef.current?.characterController.setLeft(true)}
-            onTouchEnd={() => managerRef.current?.characterController.setLeft(false)}
-            className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
-            title="Turn Left (A)"
-          >
-            ◄
-          </button>
-          <button
-            onMouseDown={() => managerRef.current?.characterController.setBackward(true)}
-            onMouseUp={() => managerRef.current?.characterController.setBackward(false)}
-            onMouseLeave={() => managerRef.current?.characterController.setBackward(false)}
-            onTouchStart={() => managerRef.current?.characterController.setBackward(true)}
-            onTouchEnd={() => managerRef.current?.characterController.setBackward(false)}
-            className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
-            title="Backward (S)"
-          >
-            ▼
-          </button>
-          <button
-            onMouseDown={() => managerRef.current?.characterController.setRight(true)}
-            onMouseUp={() => managerRef.current?.characterController.setRight(false)}
-            onMouseLeave={() => managerRef.current?.characterController.setRight(false)}
-            onTouchStart={() => managerRef.current?.characterController.setRight(true)}
-            onTouchEnd={() => managerRef.current?.characterController.setRight(false)}
-            className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
-            title="Turn Right (D)"
-          >
-            ►
-          </button>
-        </div>
+            <button
+              onMouseDown={() => managerRef.current?.characterController.setLeft(true)}
+              onMouseUp={() => managerRef.current?.characterController.setLeft(false)}
+              onMouseLeave={() => managerRef.current?.characterController.setLeft(false)}
+              onTouchStart={() => managerRef.current?.characterController.setLeft(true)}
+              onTouchEnd={() => managerRef.current?.characterController.setLeft(false)}
+              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
+              title="Turn Left (A)"
+            >
+              ◄
+            </button>
+            <button
+              onMouseDown={() => managerRef.current?.characterController.setBackward(true)}
+              onMouseUp={() => managerRef.current?.characterController.setBackward(false)}
+              onMouseLeave={() => managerRef.current?.characterController.setBackward(false)}
+              onTouchStart={() => managerRef.current?.characterController.setBackward(true)}
+              onTouchEnd={() => managerRef.current?.characterController.setBackward(false)}
+              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
+              title="Backward (S)"
+            >
+              ▼
+            </button>
+            <button
+              onMouseDown={() => managerRef.current?.characterController.setRight(true)}
+              onMouseUp={() => managerRef.current?.characterController.setRight(false)}
+              onMouseLeave={() => managerRef.current?.characterController.setRight(false)}
+              onTouchStart={() => managerRef.current?.characterController.setRight(true)}
+              onTouchEnd={() => managerRef.current?.characterController.setRight(false)}
+              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-amber-400 font-black text-sm flex items-center justify-center active:bg-amber-500 active:text-slate-950 select-none shadow-md cursor-pointer hover:bg-slate-800"
+              title="Turn Right (D)"
+            >
+              ►
+            </button>
+          </div>
 
-        {/* Action Row: Sprint, Jump, Interact */}
-        <div className="flex items-center gap-1.5 mt-2 pt-1.5 border-t border-slate-800/80">
-          <button
-            onMouseDown={() => managerRef.current?.characterController.setSprint(true)}
-            onMouseUp={() => managerRef.current?.characterController.setSprint(false)}
-            onMouseLeave={() => managerRef.current?.characterController.setSprint(false)}
-            onTouchStart={() => managerRef.current?.characterController.setSprint(true)}
-            onTouchEnd={() => managerRef.current?.characterController.setSprint(false)}
-            className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300 active:bg-amber-500 active:text-slate-950 select-none cursor-pointer hover:bg-slate-800"
-            title="Sprint / Run (Shift)"
-          >
-            RUN
-          </button>
-          <button
-            onClick={() => managerRef.current?.characterController.jumpAction()}
-            className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300 active:bg-amber-500 active:text-slate-950 select-none cursor-pointer hover:bg-slate-800"
-            title="Jump (Space)"
-          >
-            JUMP
-          </button>
-          <button
-            onClick={handleInteract}
-            className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] active:scale-95 transition-transform select-none shadow-md cursor-pointer hover:bg-amber-400"
-            title="Interact / Enter Door (E)"
-          >
-            [E]
-          </button>
+          {/* Action Row: Sprint, Jump, Interact */}
+          <div className="flex items-center gap-1.5 mt-2 pt-1.5 border-t border-slate-800/80">
+            <button
+              onMouseDown={() => managerRef.current?.characterController.setSprint(true)}
+              onMouseUp={() => managerRef.current?.characterController.setSprint(false)}
+              onMouseLeave={() => managerRef.current?.characterController.setSprint(false)}
+              onTouchStart={() => managerRef.current?.characterController.setSprint(true)}
+              onTouchEnd={() => managerRef.current?.characterController.setSprint(false)}
+              className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300 active:bg-amber-500 active:text-slate-950 select-none cursor-pointer hover:bg-slate-800"
+              title="Sprint / Run (Shift)"
+            >
+              RUN
+            </button>
+            <button
+              onClick={() => managerRef.current?.characterController.jumpAction()}
+              className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300 active:bg-amber-500 active:text-slate-950 select-none cursor-pointer hover:bg-slate-800"
+              title="Jump (Space)"
+            >
+              JUMP
+            </button>
+            <button
+              onClick={handleInteract}
+              className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] active:scale-95 transition-transform select-none shadow-md cursor-pointer hover:bg-amber-400"
+              title="Interact / Enter Door (E)"
+            >
+              [E]
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* =================================================================== */}
       {/* INTERACTIVE PROXIMITY BANNER (BOTTOM CENTER) */}
@@ -828,54 +1122,117 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
       >
         {/* Case 1: Approaching Door in Rotunda */}
         {promptDoor && currentMode === "rotunda" && (
-          <button
-            id="proximity-enter-door-banner"
-            onClick={() => handleEnterRoom(promptDoor.roomId)}
-            className="pointer-events-auto flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900/95 border-2 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce"
-            style={{
-              borderColor:
-                PALACE_ROOMS.find((r) => r.id === promptDoor.roomId)?.themeColor
-                  .accentHex || "#f59e0b",
-            }}
-          >
-            <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black text-sm">
-              E
-            </span>
-            <div className="text-left">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400">
-                Press [E] or Click to Enter
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
+              id="proximity-enter-door-banner"
+              onClick={() => handleEnterRoom(promptDoor.roomId)}
+              className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-slate-900/95 border-2 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce cursor-pointer"
+              style={{
+                borderColor:
+                  PALACE_ROOMS.find((r) => r.id === promptDoor.roomId)?.themeColor
+                    .accentHex || "#f59e0b",
+              }}
+            >
+              <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black text-sm">
+                E
+              </span>
+              <div className="text-left">
+                <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400">
+                  Press [E] or Click to Enter
+                </div>
+                <div className="text-sm font-serif font-bold text-white">
+                  Door {promptDoor.doorNumber} • {promptDoor.name}
+                </div>
               </div>
-              <div className="text-sm font-serif font-bold text-white">
-                Door {promptDoor.doorNumber} • {promptDoor.name}
+              <DoorOpen className="w-5 h-5 text-amber-400 ml-2" />
+            </button>
+
+            {/* Voice consult button on approaching door */}
+            <button
+              id="proximity-voice-door-btn"
+              onClick={() => handleTriggerVoiceModal()}
+              className="flex items-center gap-2 px-3.5 py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 transition-all shadow-2xl backdrop-blur-md cursor-pointer hover:scale-105"
+              title="Voice Ask About This Chamber [T]"
+            >
+              <Mic className="w-5 h-5 text-amber-400" />
+              <div className="text-left hidden sm:block">
+                <div className="text-[9px] font-mono uppercase text-amber-400 font-bold">Voice [T]</div>
+                <div className="text-xs font-medium text-slate-200">Ask Topic</div>
               </div>
-            </div>
-            <DoorOpen className="w-5 h-5 text-amber-400 ml-2" />
-          </button>
+            </button>
+
+            {/* Audio listen button */}
+            <button
+              id="proximity-audio-door-btn"
+              onClick={handleToggleTopicAudio}
+              className={`p-3 rounded-2xl border transition-all shadow-2xl backdrop-blur-md cursor-pointer hover:scale-105 ${
+                isSpeakingTopic
+                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/60"
+                  : "bg-slate-900/95 text-slate-300 border-slate-700/80 hover:text-white"
+              }`}
+              title={isSpeakingTopic ? "Stop Audio" : "Listen to Overview"}
+            >
+              <Headphones className={`w-5 h-5 ${isSpeakingTopic ? "text-emerald-400 animate-pulse" : "text-slate-400"}`} />
+            </button>
+          </div>
         )}
 
         {/* Case 2: Approaching Locus in Room */}
         {promptLocus && currentMode === "room" && (
-          <button
-            id="proximity-inspect-locus-banner"
-            onClick={() => setInspectedLocus(promptLocus.locus)}
-            className="pointer-events-auto flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900/95 border-2 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce"
-            style={{
-              borderColor: activeRoom?.themeColor.accentHex || "#38bdf8",
-            }}
-          >
-            <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-cyan-500 text-slate-950 font-black text-sm">
-              E
-            </span>
-            <div className="text-left">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-cyan-400">
-                Press [E] or Click to Inspect Station
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
+              id="proximity-inspect-locus-banner"
+              onClick={() => {
+                setInspectedLocus(promptLocus.locus);
+                setVisitedLociIds((prev) => ({ ...prev, [promptLocus.locus.id]: true }));
+              }}
+              className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-slate-900/95 border-2 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce cursor-pointer"
+              style={{
+                borderColor: activeRoom?.themeColor.accentHex || "#38bdf8",
+              }}
+            >
+              <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-cyan-500 text-slate-950 font-black text-sm">
+                E
+              </span>
+              <div className="text-left">
+                <div className="text-[10px] uppercase font-bold tracking-wider text-cyan-400">
+                  Press [E] or Click to Inspect Station
+                </div>
+                <div className="text-sm font-serif font-bold text-white">
+                  {promptLocus.locus.name}
+                </div>
               </div>
-              <div className="text-sm font-serif font-bold text-white">
-                {promptLocus.locus.name}
+              <Sparkles className="w-5 h-5 text-cyan-400 ml-2" />
+            </button>
+
+            {/* Voice consult button on approaching station */}
+            <button
+              id="proximity-voice-locus-btn"
+              onClick={() => handleTriggerVoiceModal()}
+              className="flex items-center gap-2 px-3.5 py-3 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 transition-all shadow-2xl backdrop-blur-md cursor-pointer hover:scale-105"
+              title="Voice Ask About This Station [T]"
+            >
+              <Mic className="w-5 h-5 text-cyan-400" />
+              <div className="text-left hidden sm:block">
+                <div className="text-[9px] font-mono uppercase text-cyan-400 font-bold">Voice [T]</div>
+                <div className="text-xs font-medium text-slate-200">Ask Station</div>
               </div>
-            </div>
-            <Sparkles className="w-5 h-5 text-cyan-400 ml-2" />
-          </button>
+            </button>
+
+            {/* Audio listen button */}
+            <button
+              id="proximity-audio-locus-btn"
+              onClick={handleToggleTopicAudio}
+              className={`p-3 rounded-2xl border transition-all shadow-2xl backdrop-blur-md cursor-pointer hover:scale-105 ${
+                isSpeakingTopic
+                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/60"
+                  : "bg-slate-900/95 text-slate-300 border-slate-700/80 hover:text-white"
+              }`}
+              title={isSpeakingTopic ? "Stop Audio" : "Listen to Station Memory Anchor"}
+            >
+              <Headphones className={`w-5 h-5 ${isSpeakingTopic ? "text-emerald-400 animate-pulse" : "text-slate-400"}`} />
+            </button>
+          </div>
         )}
 
         {/* Case 3: Near Exit Doorway in Room */}
@@ -883,7 +1240,7 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
           <button
             id="proximity-exit-room-banner"
             onClick={handleReturnRotunda}
-            className="pointer-events-auto flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900/95 border-2 border-amber-500/80 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce"
+            className="pointer-events-auto flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-slate-900/95 border-2 border-amber-500/80 hover:scale-105 transition-all shadow-2xl backdrop-blur-md animate-bounce cursor-pointer"
           >
             <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black text-sm">
               E
@@ -943,7 +1300,17 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
         </div>
 
         {/* Action Buttons (Right) */}
-        <div className="pointer-events-auto flex flex-col items-end gap-3">
+        <div className="pointer-events-auto flex flex-col items-end gap-2.5">
+          {/* Mobile Voice Button */}
+          <button
+            id="mobile-voice-btn"
+            onClick={() => handleTriggerVoiceModal()}
+            className="w-12 h-12 rounded-full bg-cyan-500/30 border border-cyan-400 text-cyan-300 font-bold text-xs flex items-center justify-center active:bg-cyan-500 active:text-slate-950 backdrop-blur-md shadow-lg cursor-pointer"
+            title="Voice Consult [T]"
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+
           {/* Sprint Toggle */}
           <button
             id="mobile-sprint-btn"
@@ -976,7 +1343,7 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
           <button
             id="mobile-interact-btn"
             onClick={handleInteract}
-            className="w-14 h-14 rounded-full bg-amber-500 text-slate-950 font-black text-base flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+            className="w-14 h-14 rounded-full bg-amber-500 text-slate-950 font-black text-base flex items-center justify-center shadow-lg active:scale-95 transition-transform cursor-pointer"
           >
             E
           </button>
@@ -995,6 +1362,21 @@ export const MindPalaceGame: React.FC<MindPalaceGameProps> = ({
             setInspectedLocus(null);
             onSelectLocusForCurator(prompt);
           }}
+          onOpenVoiceTopic={(topic) => {
+            setInspectedLocus(null);
+            handleTriggerVoiceModal(topic);
+          }}
+        />
+      )}
+
+      {/* =================================================================== */}
+      {/* VOICE TOPIC INTERACTION MODAL */}
+      {/* =================================================================== */}
+      {voiceModalOpen && voiceTopic && (
+        <VoiceTopicInteractionModal
+          isOpen={voiceModalOpen}
+          topic={voiceTopic}
+          onClose={() => setVoiceModalOpen(false)}
         />
       )}
     </div>

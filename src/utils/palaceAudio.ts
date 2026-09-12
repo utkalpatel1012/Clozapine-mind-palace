@@ -196,6 +196,152 @@ export class PalaceAudioEngine {
       osc.stop(now + 0.16);
     } catch {}
   }
+
+  public playVoiceListenChime() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.08, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.26);
+    } catch {}
+  }
+
+  public playVoiceSuccessChime() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880, now + 0.1); // A5
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.36);
+    } catch {}
+  }
+
+  // =========================================================================
+  // SPEECH SYNTHESIS NARRATION ENGINE
+  // =========================================================================
+  private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private _isVoiceSpeaking: boolean = false;
+
+  public cleanTextForSpeech(rawText: string): string {
+    return rawText
+      // Remove markdown links, symbols, headers, asterisks, bullet points
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[#*`_~]/g, "")
+      .replace(/•|\*/g, "")
+      // Convert medical symbols & abbreviations for fluid oral delivery
+      .replace(/\bANC\b/g, "A-N-C")
+      .replace(/\bTRS\b/g, "treatment resistant schizophrenia")
+      .replace(/\bCYP1A2\b/g, "C-Y-P one A two")
+      .replace(/\bCYP2D6\b/g, "C-Y-P two D six")
+      .replace(/\bCYP3A4\b/g, "C-Y-P three A four")
+      .replace(/\b5-HT2A\b/g, "5-H-T two A")
+      .replace(/\b5-HT1A\b/g, "5-H-T one A")
+      .replace(/\bD2\b/g, "D two")
+      .replace(/\bD4\b/g, "D four")
+      .replace(/\bM1\b/g, "M one")
+      .replace(/\bH1\b/g, "H one")
+      .replace(/\bng\/mL\b/g, "nanograms per milliliter")
+      .replace(/\bmg\/day\b/g, "milligrams per day")
+      .replace(/\b\/µL\b/g, "per microliter")
+      .replace(/<|&lt;/g, "less than ")
+      .replace(/>|&gt;/g, "greater than ")
+      .replace(/≤/g, "less than or equal to ")
+      .replace(/≥/g, "greater than or equal to ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  public speak(
+    text: string,
+    options?: {
+      onStart?: () => void;
+      onEnd?: () => void;
+      onError?: () => void;
+      rate?: number;
+      pitch?: number;
+    }
+  ) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    this.stopSpeaking();
+
+    const clean = this.cleanTextForSpeech(text);
+    if (!clean) return;
+
+    try {
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.rate = options?.rate ?? 1.0;
+      utterance.pitch = options?.pitch ?? 0.98;
+
+      // Select high quality natural voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(
+        (v) =>
+          (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha") || v.name.includes("Daniel")) &&
+          v.lang.startsWith("en")
+      ) || voices.find((v) => v.lang.startsWith("en"));
+
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+
+      utterance.onstart = () => {
+        this._isVoiceSpeaking = true;
+        options?.onStart?.();
+      };
+
+      utterance.onend = () => {
+        this._isVoiceSpeaking = false;
+        this.currentUtterance = null;
+        options?.onEnd?.();
+      };
+
+      utterance.onerror = () => {
+        this._isVoiceSpeaking = false;
+        this.currentUtterance = null;
+        options?.onError?.();
+      };
+
+      this.currentUtterance = utterance;
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      this._isVoiceSpeaking = false;
+    }
+  }
+
+  public stopSpeaking() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    this._isVoiceSpeaking = false;
+    this.currentUtterance = null;
+  }
+
+  public isVoiceSpeaking(): boolean {
+    return this._isVoiceSpeaking || (typeof window !== "undefined" && window.speechSynthesis?.speaking);
+  }
 }
 
 export const palaceAudio = new PalaceAudioEngine();

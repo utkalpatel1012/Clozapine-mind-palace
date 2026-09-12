@@ -28,6 +28,7 @@ export class CharacterController {
   // Character physical state
   public position = { x: 0, y: 0, z: 0 };
   public rotation = 0; // Yaw in radians
+  public velocity = { x: 0, z: 0 };
   public velocityY = 0;
   public isGrounded = true;
   public isMoving = false;
@@ -45,10 +46,16 @@ export class CharacterController {
 
   private onFootstepCallback?: () => void;
   private onInteractCallback?: () => void;
+  public onVoiceInteractCallback?: () => void;
 
-  constructor(onFootstep?: () => void, onInteract?: () => void) {
+  constructor(
+    onFootstep?: () => void,
+    onInteract?: () => void,
+    onVoiceInteract?: () => void
+  ) {
     this.onFootstepCallback = onFootstep;
     this.onInteractCallback = onInteract;
+    this.onVoiceInteractCallback = onVoiceInteract;
     this.bindKeyboardEvents();
   }
 
@@ -56,11 +63,14 @@ export class CharacterController {
     this.position.x = x;
     this.position.y = y;
     this.position.z = z;
+    this.velocity.x = 0;
+    this.velocity.z = 0;
     this.rotation = rotation;
     this.cameraYaw = rotation;
     this.velocityY = 0;
     this.isGrounded = true;
     this.isMoving = false;
+    this.moveSpeed = 0;
     this.walkCycle = 0;
   }
 
@@ -135,6 +145,11 @@ export class CharacterController {
           // Toggle perspective
           this.isFirstPerson = !this.isFirstPerson;
           break;
+        case "KeyT":
+          if (this.onVoiceInteractCallback) {
+            this.onVoiceInteractCallback();
+          }
+          break;
       }
   };
 
@@ -207,6 +222,9 @@ export class CharacterController {
     const inputMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
     this.isMoving = inputMagnitude > 0.1;
 
+    let targetVx = 0;
+    let targetVz = 0;
+
     if (this.isMoving) {
       const normX = moveX / Math.max(1, inputMagnitude);
       const normZ = moveZ / Math.max(1, inputMagnitude);
@@ -224,15 +242,30 @@ export class CharacterController {
       while (diff < -Math.PI) diff += Math.PI * 2;
       this.rotation += diff * Math.min(1, 14 * dt);
 
-      // Calculate speed
-      const baseSpeed = this.input.sprint ? 11.0 : 6.5;
-      this.moveSpeed = baseSpeed * Math.min(1, inputMagnitude);
+      // Target velocity
+      const baseSpeed = this.input.sprint ? 11.5 : 6.5;
+      const speed = baseSpeed * Math.min(1, inputMagnitude);
+      targetVx = worldDirX * speed;
+      targetVz = worldDirZ * speed;
+    }
 
-      // Translate position
-      this.position.x += worldDirX * this.moveSpeed * dt;
-      this.position.z += worldDirZ * this.moveSpeed * dt;
+    // Smooth acceleration & friction damping
+    const accelRate = this.isMoving ? 14.0 : 10.0;
+    this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, accelRate * dt);
+    this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, accelRate * dt);
 
-      // Animate walk cycle
+    // Stop micro-jitter
+    if (!this.isMoving && Math.abs(this.velocity.x) < 0.05 && Math.abs(this.velocity.z) < 0.05) {
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+    }
+
+    this.position.x += this.velocity.x * dt;
+    this.position.z += this.velocity.z * dt;
+    this.moveSpeed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+
+    if (this.moveSpeed > 0.3) {
+      // Animate walk cycle smoothly
       this.walkCycle += this.moveSpeed * 1.8 * dt;
 
       // Footstep audio trigger
@@ -244,7 +277,6 @@ export class CharacterController {
         }
       }
     } else {
-      this.moveSpeed = 0;
       // Damped walkCycle return to neutral
       this.walkCycle %= Math.PI * 2;
       this.stepTimer = 0.5;

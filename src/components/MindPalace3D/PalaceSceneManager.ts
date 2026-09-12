@@ -61,6 +61,10 @@ export class PalaceSceneManager {
   public nearestLocus: LocusObject | null = null;
   public isNearExitDoor: boolean = false;
 
+  // Camera smoothing
+  private currentCameraPos: THREE.Vector3 = new THREE.Vector3(0, 4, 13.5);
+  private currentLookAt: THREE.Vector3 = new THREE.Vector3(0, 1.6, 0);
+
   // Particle systems & animated objects
   private animatedMeshes: Array<{
     mesh: THREE.Object3D;
@@ -84,7 +88,8 @@ export class PalaceSceneManager {
     onTriggerEnterRoom?: (roomId: PalaceRoomId) => void,
     onTriggerReturnRotunda?: () => void,
     onFootstep?: () => void,
-    onInteract?: () => void
+    onInteract?: () => void,
+    onVoiceInteract?: () => void
   ) {
     this.container = container;
     this.onTriggerEnterRoom = onTriggerEnterRoom;
@@ -113,7 +118,7 @@ export class PalaceSceneManager {
     container.appendChild(this.renderer.domElement);
 
     // 4. Setup Character Controller & Mesh
-    this.characterController = new CharacterController(onFootstep, onInteract);
+    this.characterController = new CharacterController(onFootstep, onInteract, onVoiceInteract);
     const { group, leftLeg, rightLeg, leftArm, rightArm, cape, lantern, light } = this.buildCharacterModel();
     this.characterGroup = group;
     this.leftLegPivot = leftLeg;
@@ -637,6 +642,13 @@ export class PalaceSceneManager {
 
     // Starry particulate dust in the air
     this.buildAmbientDustParticles(rotundaRadius);
+
+    // Smoothly spawn character facing inward toward the grand rotunda doors
+    this.characterController.setPosition(0, 0, 8.5, Math.PI);
+    this.currentCameraPos.set(0, 4.5, 14.5);
+    this.currentLookAt.set(0, 1.6, 8.5);
+    this.camera.position.copy(this.currentCameraPos);
+    this.camera.lookAt(this.currentLookAt);
   }
 
   // =========================================================================
@@ -1109,6 +1121,13 @@ export class PalaceSceneManager {
       position: new THREE.Vector3(0, 0, roomSize),
       openProgress: 0,
     };
+
+    // Smoothly spawn character facing inward toward the chamber centerpiece and loci
+    this.characterController.setPosition(0, 0, roomSize - 7.5, Math.PI);
+    this.currentCameraPos.set(0, 4.5, roomSize - 1.5);
+    this.currentLookAt.set(0, 1.6, roomSize - 7.5);
+    this.camera.position.copy(this.currentCameraPos);
+    this.camera.lookAt(this.currentLookAt);
   }
 
   // =========================================================================
@@ -1578,7 +1597,7 @@ export class PalaceSceneManager {
     this.lanternMesh.position.y = Math.sin(Date.now() * 0.003) * 0.08;
 
     // 2. Camera Tracking
-    this.updateCamera();
+    this.updateCamera(dt);
 
     // 3. Proximity Checks for Doors & Loci
     this.updateProximityChecks(dt);
@@ -1601,28 +1620,44 @@ export class PalaceSceneManager {
   }
 
   // =========================================================================
-  // CAMERA POSITIONING & THIRD-PERSON ORBIT
+  // CAMERA POSITIONING & THIRD-PERSON ORBIT (SMOOTH EXPONENTIAL DAMPING)
   // =========================================================================
-  private updateCamera() {
+  private updateCamera(dt: number) {
     const { position, cameraYaw, cameraPitch, cameraDistance, isFirstPerson } = this.characterController;
 
     if (isFirstPerson) {
       // First Person: Camera placed at character head position
-      this.camera.position.set(position.x, position.y + 2.05, position.z);
+      const desiredPos = new THREE.Vector3(position.x, position.y + 2.05, position.z);
       const lookDist = 5.0;
       const targetX = position.x + Math.sin(cameraYaw) * Math.cos(cameraPitch) * lookDist;
       const targetY = position.y + 2.05 - Math.sin(cameraPitch) * lookDist;
       const targetZ = position.z + Math.cos(cameraYaw) * Math.cos(cameraPitch) * lookDist;
-      this.camera.lookAt(targetX, targetY, targetZ);
+      const desiredLook = new THREE.Vector3(targetX, targetY, targetZ);
+
+      const lerpPos = Math.min(1.0, 1.0 - Math.exp(-22.0 * dt));
+      this.currentCameraPos.lerp(desiredPos, lerpPos);
+      this.currentLookAt.lerp(desiredLook, lerpPos);
+
+      this.camera.position.copy(this.currentCameraPos);
+      this.camera.lookAt(this.currentLookAt);
     } else {
-      // Third Person: Camera orbits behind character
+      // Third Person: Smooth orbiting camera behind character
       const offsetX = Math.sin(cameraYaw) * Math.cos(cameraPitch) * cameraDistance;
       const offsetY = Math.sin(cameraPitch) * cameraDistance + 1.8;
       const offsetZ = Math.cos(cameraYaw) * Math.cos(cameraPitch) * cameraDistance;
 
-      this.camera.position.set(position.x + offsetX, position.y + offsetY, position.z + offsetZ);
-      // Look at character chest/head height
-      this.camera.lookAt(position.x, position.y + 1.6, position.z);
+      const desiredPos = new THREE.Vector3(position.x + offsetX, position.y + offsetY, position.z + offsetZ);
+      const desiredLook = new THREE.Vector3(position.x, position.y + 1.6, position.z);
+
+      // Smooth cinematic interpolation
+      const lerpPos = Math.min(1.0, 1.0 - Math.exp(-12.0 * dt));
+      const lerpLook = Math.min(1.0, 1.0 - Math.exp(-14.0 * dt));
+
+      this.currentCameraPos.lerp(desiredPos, lerpPos);
+      this.currentLookAt.lerp(desiredLook, lerpLook);
+
+      this.camera.position.copy(this.currentCameraPos);
+      this.camera.lookAt(this.currentLookAt);
     }
   }
 
