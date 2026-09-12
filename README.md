@@ -4,18 +4,19 @@ An interactive 3D spatial mind palace walkthrough for master-level clinical phar
 
 ---
 
-## Automatic GitHub Pages Deployment
+## Automatic GitHub Deployment
 
-This repository includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) that automatically builds and publishes the website whenever you push changes to the `main` or `master` branch.
+This repository includes an automated GitHub Actions workflow (`.github/workflows/deploy.yml`) that builds and publishes your website on every `git push` to `main` or `master`.
 
-### Enabling GitHub Pages in your Repository (One-Time Setup)
-
-1. Push this repository to your GitHub account.
-2. In your GitHub repository, click on the **Settings** tab.
-3. In the left sidebar under *Code and automation*, click on **Pages**.
-4. Under **Build and deployment** > **Source**, change the dropdown from *Deploy from a branch* to **GitHub Actions**.
-5. Once selected, pushing any commit to `main` or `master` will trigger the deployment workflow automatically!
-6. Your live website URL will be displayed at the top of the Pages settings page (`https://<your-username>.github.io/<your-repo-name>/`).
+### How It Deploys:
+1. **Automated `gh-pages` branch deployment**: The workflow compiles your site and pushes the production build directly to the `gh-pages` branch.
+2. **GitHub Pages (One-Time Setting in your GitHub Repo)**:
+   - Go to your repository on GitHub.
+   - Click **Settings** > **Pages** (in the left sidebar).
+   - Under **Build and deployment** > **Source**:
+     - **Option A (Recommended)**: Set Source to **Deploy from a branch**, and select **`gh-pages`** / `/(root)`.
+     - **Option B**: Set Source to **GitHub Actions**.
+   - Your website will immediately be live at `https://<your-username>.github.io/<your-repo-name>/`!
 
 ---
 
